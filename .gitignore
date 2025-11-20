@@ -1,0 +1,14 @@
+# ignore any [ ] file in research directory or sub-directory
+*.fits
+*.pdf
+*.npy
+*.png
+*.dat
+*.pyc
+*.csv
+.DS_Store
+.ipynb_checkpoints
+__pycache__/
+code/pe_runs/*
+notebooks/pe_runs/*
+notebooks/*.json
