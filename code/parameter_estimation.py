@@ -5,69 +5,100 @@ import matplotlib.pyplot as plt
 import json
 import glob
 
+import cogwheel
 import cogwheel.cosmology
 import cogwheel.data
 import cogwheel.posterior
 import cogwheel.sampling
 import cogwheel.gw_plotting
 import cogwheel.gw_utils
+from cogwheel.likelihood.marginalization.coherent_score_lensing import CoherentScoreLensing
 
 import lal
 
 from gwpy.table import EventTable
 
-
+ 
 def main():
     
-    # which catalog?
+    ## MAIN INPUTS ##
+
+    # list of GW events
     catalog = 'GWTC-4.0'
     # look for events in this directory
-    catalog_dir = f'/home/javier.roulet/cogwheel-catalog/processed_data/{catalog}' # f'../data/{catalog}'
-    event_dir_list = glob.glob(f'{catalog_dir}/GW*')
+    catalog_dir = f'/home/javier.roulet/cogwheel-catalog/processed_data/{catalog}'
+    # event_dir_list = glob.glob(f'{catalog_dir}/GW*')
+    # eventname_list = [
+    #     event_dir.split('/')[-1] for event_dir in event_dir_list
+    # ]
+
+    # ! manually inserting a list here:
     eventname_list = [
-        event_dir.split('/')[-1] for event_dir in event_dir_list
+        'GW230628_231200',
+        'GW231226_101520',
+        'GW231028_153006',
+        'GW231206_233901',
+        'GW230914_111401',
+        'GW230814_230901',
+        'GW231123_135430'
+        'GW230927_153832',
+        'GW231102_071736',
+        'GW230627_015337',
+        'GW230919_215712'
     ]
     print(f"found {len(eventname_list)} events: ", flush=True)
     print(eventname_list, flush=True)
 
+    # approximant
+    approximant = 'IMRPhenomXPHM'
+    # prior class
+    prior_class = 'IntrinsicLVCPrior'
+    # run directory
+    rundir = '../data/pe_runs_lensing'
+
+    # skip existing samples?
+    skip_existing = False
+
     for i, eventname in enumerate(eventname_list):
-        print(f"starting PE for {eventname}...", flush=True)
+        print(f"starting PE for {eventname} ({i+1} of {len(eventname_list)})...", flush=True)
         # get the corresponding event data from the open-data catalogue
         # *for now this is to get the "guess" chirp mass directly from the published chirp mass in the catalogue
         event_table = get_table_data(eventname, catalog)
         # check our input eventname against the name in the table
         eventname = check_eventname(eventname, event_table)
 
+        # if skip_existing is True, get the run directory to see if we've already performed PE on this event
+        # **TODO: this is clunky: potential mismatch between this save_dir and the one used by run_parameter_estimation()
+        if skip_existing == True:
+            save_dir = os.path.join(rundir, prior_class, eventname)
+            samples_list = glob.glob(os.path.join(save_dir, f'*/samples.feather'))
+            # if the list is not empty, don't run parameter estimation since it's already been done !
+            if samples_list:
+                print(f"posterior samples found for {eventname} at {samples_list[0]} and skip_existing is True. skipping this event")
+                continue
+
         # do we have a config for this event?
         config_fn = os.path.join(catalog_dir, eventname, 'event_data_kwargs.json') #'../data/event_configs.json'
         with open(config_fn) as file:
-            event_configs = json.load(file)
-        try:
-            event_pars = event_configs[eventname]
-        except KeyError:
-            print(f"no config entry found for {eventname}; using default parameters to process timeseries data", flush=True)
-            event_pars = {}
+            event_pars = json.load(file)
 
-        t_merger_guess = 0.
+        t_merger_guess = -0.1 if eventname == 'GW231123_135430' else 0. # !!
+        print(f"t_merger_guess = {t_merger_guess:.2f} sec", flush=True)
         mchirp_guess = get_chirp_mass(event_table)
 
-        print(f"detector-frame chirp mass guess = {mchirp_guess} Msun", flush=True)
-
-        samples = run_parameter_estimation(eventname, t_merger_guess, mchirp_guess, event_pars=event_pars)
-
-        # save the samples
-        save_dir = os.path.join('../data', catalog, eventname) #os.path.join(event_dir_list[i], 'posterior_samples')
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
-        save_fn = os.path.join(save_dir, 'posterior_samples')
-        np.save(save_fn, samples)
-        print(f"done! saved to {save_fn}\n", flush=True)
+        print(f"detector-frame chirp mass guess = {mchirp_guess:.2f} Msun", flush=True)
+        
+        # run the PE: the posterior and samples are automatically saved in the corresponding `rundir`
+        samples = run_parameter_estimation(eventname, t_merger_guess, mchirp_guess, event_pars=event_pars,
+                                            approximant=approximant, prior_class=prior_class, rundir=rundir)
 
 
 def run_parameter_estimation(eventname, t_merger_guess, mchirp_guess,
-                                approximant = 'IMRPhenomXAS',
-                                prior_class = 'IntrinsicAlignedSpinIASPrior',
+                                approximant = 'IMRPhenomXPHM', # 'IMRPhenomXAS'
+                                prior_class = 'IntrinsicLVCPrior', # 'IntrinsicAlignedSpinIASPrior'
                                 event_pars = None,
+                                rundir = '../data/pe_runs',
+                                skip_existing = False,
                                 verbose = True):
 
     """ get the event data """
@@ -78,6 +109,7 @@ def run_parameter_estimation(eventname, t_merger_guess, mchirp_guess,
     if verbose:
         print(f"\ncomputing posterior...")
     # first we want to perform a fast likelihood maximization to find our reference waveform:
+    #   (this doesn't include lensing yet)
     posterior = cogwheel.posterior.Posterior.from_event(
         event_data,
         mchirp_guess,
@@ -89,31 +121,38 @@ def run_parameter_estimation(eventname, t_merger_guess, mchirp_guess,
         }
     )
 
+    # instantiate a CoherentScoreLensing object
+    coherent_score = CoherentScoreLensing(**posterior.likelihood.coherent_score.get_init_dict())
+    # reinstantiate the likelihood
+    lensing_likelihood = posterior.likelihood.reinstantiate(coherent_score=coherent_score)
+
+    # now we can use the same prior with the lensing likelihood to instantiate a new posterior object
+    lensing_posterior = cogwheel.posterior.Posterior(prior=posterior.prior, likelihood=lensing_likelihood)
+
     """ sample the posterior """
     if verbose:
         print(f"\nsampling from posterior...", flush=True)
     # using Nautilus
-    sampler = cogwheel.sampling.Nautilus(posterior)
+    sampler = cogwheel.sampling.Nautilus(lensing_posterior)
+
+    # check that we have the version with lensing!
+    print(f"sampler.posterior.likelihood.coherent_score: ", sampler.posterior.likelihood.coherent_score.__class__)
 
     # these trade off quality and speed:
     sampler.run_kwargs['n_live'] = 1000
-    sampler.run_kwargs['n_eff'] = 2000      # TODO: discuss with Javier, should I play around with these?
+    sampler.run_kwargs['n_eff'] = 2000
 
     # get the run directory
-    rundir = sampler.get_rundir(parentdir='pe_runs')
+    rundir = sampler.get_rundir(parentdir=rundir)
     if verbose:
         print(f"rundir: {rundir}", flush=True)
-    # run the sampling
+    # run the sampling (this saves the samples to rundir as a .feather)
     sampler.run(rundir)
-    # get the samples
-    samples = pd.read_feather(rundir/'samples.feather')
-
-    return samples
 
 
 def get_event_data(eventname, **kwargs):
     """
-    Returns an event data object given an event name string.
+    Returns event timeseries data from cogwheel given an event name string.
     """
     filenames, detector_names, tgps = cogwheel.data.download_timeseries(eventname)
     event_data = cogwheel.data.EventData.from_timeseries(filenames, eventname, detector_names, tgps, **kwargs)
@@ -153,6 +192,7 @@ def get_chirp_mass(event_table):
     # some of these are reported as None:
     #   if this is the case, calculate the detector-frame chirp mass from the source chirp mass + redshift
     if chirp_mass == None:
+        assert event_table['redshift'] is not None, "no redshift information in event table"
         chirp_mass = (1 + event_table['redshift']) * event_table['chirp_mass_source']
     
     # unpack the actual number, which is slightly buried in this masked array setup
