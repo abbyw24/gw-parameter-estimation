@@ -27,25 +27,17 @@ def main():
     catalog = 'GWTC-4.0'
     # look for events in this directory
     catalog_dir = f'/home/javier.roulet/cogwheel-catalog/processed_data/{catalog}'
-    # event_dir_list = glob.glob(f'{catalog_dir}/GW*')
+    event_dir_list = glob.glob(f'{catalog_dir}/GW*')
     # eventname_list = [
     #     event_dir.split('/')[-1] for event_dir in event_dir_list
     # ]
+    eventname_list = ['GW230814_230901']
 
-    # ! manually inserting a list here:
-    eventname_list = [
-        'GW230628_231200',
-        'GW231226_101520',
-        'GW231028_153006',
-        'GW231206_233901',
-        'GW230914_111401',
-        'GW230814_230901',
-        'GW231123_135430'
-        'GW230927_153832',
-        'GW231102_071736',
-        'GW230627_015337',
-        'GW230919_215712'
-    ]
+    # !! hacky
+    event_to_remove = 'GW231123_135430'
+    if event_to_remove in eventname_list:
+        eventname_list.remove(event_to_remove)
+
     print(f"found {len(eventname_list)} events: ", flush=True)
     print(eventname_list, flush=True)
 
@@ -54,10 +46,12 @@ def main():
     # prior class
     prior_class = 'IntrinsicLVCPrior'
     # run directory
-    rundir = '../data/pe_runs_lensing'
+    rundir = '../data/pe_runs_lensing/multiplied_by_i'
+    if not os.path.exists(rundir):
+        os.makedirs(rundir)
 
     # skip existing samples?
-    skip_existing = False
+    skip_existing = True
 
     for i, eventname in enumerate(eventname_list):
         print(f"starting PE for {eventname} ({i+1} of {len(eventname_list)})...", flush=True)
@@ -90,20 +84,29 @@ def main():
         
         # run the PE: the posterior and samples are automatically saved in the corresponding `rundir`
         samples = run_parameter_estimation(eventname, t_merger_guess, mchirp_guess, event_pars=event_pars,
-                                            approximant=approximant, prior_class=prior_class, rundir=rundir)
+                                            approximant=approximant, prior_class=prior_class, rundir=rundir,
+                                            multiply_by_i=True, verbose=True)
 
 
 def run_parameter_estimation(eventname, t_merger_guess, mchirp_guess,
-                                approximant = 'IMRPhenomXPHM', # 'IMRPhenomXAS'
-                                prior_class = 'IntrinsicLVCPrior', # 'IntrinsicAlignedSpinIASPrior'
-                                event_pars = None,
-                                rundir = '../data/pe_runs',
-                                skip_existing = False,
-                                verbose = True):
+                                approximant='IMRPhenomXPHM', # 'IMRPhenomXAS'
+                                prior_class='IntrinsicLVCPrior', # 'IntrinsicAlignedSpinIASPrior'
+                                event_pars=None,
+                                rundir='../data/pe_runs',
+                                skip_existing=False,
+                                multiply_by_i=False,
+                                verbose=False):
 
     """ get the event data """
     event_pars = event_pars or {}
     event_data = get_event_data(eventname, **event_pars)
+
+    # multiply the strain by i ?!
+    if multiply_by_i:
+        print(f"multiplying the strain by i", flush=True)
+        event_data_ = event_data.reinstantiate(strain=1j*event_data.strain)
+    else:
+        event_data_ = event_data
 
     """ compute the posterior """
     if verbose:
@@ -111,7 +114,7 @@ def run_parameter_estimation(eventname, t_merger_guess, mchirp_guess,
     # first we want to perform a fast likelihood maximization to find our reference waveform:
     #   (this doesn't include lensing yet)
     posterior = cogwheel.posterior.Posterior.from_event(
-        event_data,
+        event_data_,
         mchirp_guess,
         approximant,
         prior_class,
@@ -120,6 +123,12 @@ def run_parameter_estimation(eventname, t_merger_guess, mchirp_guess,
             'time_range': (t_merger_guess - 0.1, t_merger_guess + 0.1)  # Edit if needed
         }
     )
+
+    # sample from the posterior
+    sample_from_posterior(posterior, rundir, verbose=verbose)
+
+
+def sample_from_posterior(posterior, rundir, n_live=1000, n_eff=2000, verbose=False):
 
     # instantiate a CoherentScoreLensing object
     coherent_score = CoherentScoreLensing(**posterior.likelihood.coherent_score.get_init_dict())
@@ -135,12 +144,9 @@ def run_parameter_estimation(eventname, t_merger_guess, mchirp_guess,
     # using Nautilus
     sampler = cogwheel.sampling.Nautilus(lensing_posterior)
 
-    # check that we have the version with lensing!
-    print(f"sampler.posterior.likelihood.coherent_score: ", sampler.posterior.likelihood.coherent_score.__class__)
-
     # these trade off quality and speed:
-    sampler.run_kwargs['n_live'] = 1000
-    sampler.run_kwargs['n_eff'] = 2000
+    sampler.run_kwargs['n_live'] = n_live
+    sampler.run_kwargs['n_eff'] = n_eff
 
     # get the run directory
     rundir = sampler.get_rundir(parentdir=rundir)
