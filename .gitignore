@@ -7,8 +7,12 @@
 *.pyc
 *.csv
 .DS_Store
-.ipynb_checkpoints
+.ipynb_checkpoints/
+.ipynb_checkpoints/*
 __pycache__/
 code/pe_runs/*
 notebooks/pe_runs/*
 notebooks/*.json
+data/
+notebooks/pitp-pe-exercises/
+notebooks/pitp-pe-exercises/*
