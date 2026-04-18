@@ -11,6 +11,8 @@
 .ipynb_checkpoints/*
 __pycache__/
 code/pe_runs/*
+code/.ipynb_checkpoints/
+code/.ipynb_checkpoints/*
 notebooks/pe_runs/*
 notebooks/*.json
 data/
