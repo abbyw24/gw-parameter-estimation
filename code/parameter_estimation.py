@@ -13,6 +13,7 @@ import cogwheel.sampling
 import cogwheel.gw_plotting
 import cogwheel.gw_utils
 from cogwheel.likelihood.marginalization.coherent_score_lensing import CoherentScoreLensing
+from pesummary.io import read
 
 import lal
 
@@ -24,14 +25,17 @@ def main():
     ## MAIN INPUTS ##
 
     # list of GW events
-    catalog = 'GWTC-4.0'
+    catalog = 'O4_Discovery_Papers'
     # look for events in this directory
     catalog_dir = f'/home/javier.roulet/cogwheel-catalog/processed_data/{catalog}'
-    event_dir_list = glob.glob(f'{catalog_dir}/GW*')
+    # event_dir_list = glob.glob(f'{catalog_dir}/GW*')
     # eventname_list = [
     #     event_dir.split('/')[-1] for event_dir in event_dir_list
     # ]
-    eventname_list = ['GW230814_230901']
+
+    eventname_list = [
+        'GW241110_124123'
+    ]
 
     # !! hacky
     event_to_remove = 'GW231123_135430'
@@ -46,9 +50,8 @@ def main():
     # prior class
     prior_class = 'IntrinsicLVCPrior'
     # run directory
-    rundir = '../data/pe_runs_lensing/multiplied_by_i'
-    if not os.path.exists(rundir):
-        os.makedirs(rundir)
+    rundir = '../data/pe_runs_lensing'
+    os.makedirs(rundir, exist_ok=True)
 
     # skip existing samples?
     skip_existing = True
@@ -72,9 +75,13 @@ def main():
                 continue
 
         # do we have a config for this event?
-        config_fn = os.path.join(catalog_dir, eventname, 'event_data_kwargs.json') #'../data/event_configs.json'
-        with open(config_fn) as file:
-            event_pars = json.load(file)
+        config_fn = os.path.join(catalog_dir, eventname, 'event_data_kwargs.json')
+        try:
+            with open(config_fn) as file:
+                event_pars = json.load(file)
+        except FileNotFoundError:
+            print(f"config file not found at {config_fn}; using default event_pars")
+            event_pars = None
 
         t_merger_guess = -0.1 if eventname == 'GW231123_135430' else 0. # !!
         print(f"t_merger_guess = {t_merger_guess:.2f} sec", flush=True)
@@ -85,7 +92,7 @@ def main():
         # run the PE: the posterior and samples are automatically saved in the corresponding `rundir`
         samples = run_parameter_estimation(eventname, t_merger_guess, mchirp_guess, event_pars=event_pars,
                                             approximant=approximant, prior_class=prior_class, rundir=rundir,
-                                            multiply_by_i=True, verbose=True)
+                                            multiply_by_i=False, verbose=True)
 
 
 def run_parameter_estimation(eventname, t_merger_guess, mchirp_guess,
@@ -165,7 +172,7 @@ def get_event_data(eventname, **kwargs):
     return event_data
 
 
-def check_eventname(eventname, event_table):
+def check_eventname(eventname, event_table, verbose=False):
     """
     Checks an input eventname against the event name in a table (e.g. from `get_table_data()`) and, if needed, returns
     a corrected eventname to match the name in the table (so it matches the name in GWOSC).
@@ -175,7 +182,8 @@ def check_eventname(eventname, event_table):
         # if there is a version attached to the name in the event table (as 'GWxxxxxx_xxxxxx-vY', we need to remove this
         #    from the name used to get timeseries data
         corrected_eventname = eventname_in_table
-        print(f"found event for {corrected_eventname}; updating eventname from {eventname}", flush=True)
+        if verbose:
+            print(f"found event for {corrected_eventname}; updating eventname from {eventname}", flush=True)
         eventname = corrected_eventname
     assert eventname == eventname_in_table
 
@@ -198,9 +206,11 @@ def get_chirp_mass(event_table):
     # some of these are reported as None:
     #   if this is the case, calculate the detector-frame chirp mass from the source chirp mass + redshift
     if chirp_mass == None:
-        assert event_table['redshift'] is not None, "no redshift information in event table"
-        chirp_mass = (1 + event_table['redshift']) * event_table['chirp_mass_source']
-    
+        try:
+            chirp_mass = (1 + event_table['redshift']) * event_table['chirp_mass_source']
+        except TypeError:
+            print(f"couldn't get redshift information. defaulting to source-frame chirp mass")
+            chirp_mass = event_table['chirp_mass_source']
     # unpack the actual number, which is slightly buried in this masked array setup
     return chirp_mass.value.data[0]
 
@@ -221,6 +231,49 @@ def add_derived_quantities(samples):
     samples['chieff'] = cogwheel.gw_utils.chieff(**samples[['m1', 'm2', 's1z', 's2z']])
 
     samples['q'] = samples['m2'] / samples['m1']
+
+
+def load_posterior_samples(eventname, event_path, verbose=True):
+    # find the "earliest" run with posterior samples
+    i = 0
+    while i < 10:
+        try:
+            samples = pd.read_feather(os.path.join(event_path, f'run_{i}', 'samples.feather'))
+            if verbose:
+                print(f"loaded posterior samples for {eventname} run {i}")
+            break
+        except FileNotFoundError:
+            samples = None
+            i += 1
+    if samples is None and verbose:
+        print(f"could not find posterior samples for {eventname} in {event_path}")
+    else:
+        # add derived quantities
+        add_derived_quantities(samples)
+
+    return samples
+
+
+def load_lvk_samples(eventname, key=None):
+    # load the posterior samples from the LIGO PE data release
+    try:
+        pe_data_fn = f"../data/pe_data_release/IGWN-GWTC4p0-1a206db3d_721-{eventname}-combined_PEDataRelease.hdf5"
+        data = read(pe_data_fn)
+        key = 'C00:IMRPhenomXPHM-SpinTaylor' if key is None else key
+    except FileNotFoundError:
+        # try GWTC-2.1
+        try:
+            pe_data_fn = f"../data/pe_data_release/IGWN-GWTC2p1-v2-{eventname}_PEDataRelease_mixed_cosmo.h5"
+            data = read(pe_data_fn)
+            key = 'C01:IMRPhenomXPHM' if key is None else key
+        except FileNotFoundError:
+            print(f"couldn't find any LVK samples for {eventname} (in GWTC-4.0 or GWTC-2.1)")
+            return
+
+    # get the posterior samples using the [key] approximant
+    samples = data.samples_dict[key]
+
+    return samples
 
 if __name__=='__main__':
     main()
