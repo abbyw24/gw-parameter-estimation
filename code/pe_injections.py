@@ -24,23 +24,31 @@ from parameter_estimation import sample_from_posterior
 def main():
 
     ## CREATE EVENT DATA ##
-    seed = 24
+    seed = 100
+
+    # run directory
+    rundir = '../data/pe_runs_lensing/injections'
+
+    # check if this event already exists; if so, change the seed number
+    def seed_exists(seed):
+        return os.path.exists(os.path.join(rundir, f'GW{seed}'))
+    while seed_exists(seed):
+        seed += 1
 
     # the parameters that we want to set explicitly
     params_to_inject = {
-        'm1' : 50,   # in Msun
+        'm1' : 60,   # in Msun
         'm2' : 20,   # in Msun
-        'iota' : np.pi / 3,   # in radians
-        'd_luminosity' : 1000.   # Mpc
+        'iota' : 0.01,   # in radians
+        'd_luminosity' : 500.   # Mpc
     }
+    print(f"creating injection with seed {seed}", flush=True)
     event_data = create_injection(seed, params_to_inject)
 
     # approximant
     approximant = 'IMRPhenomXPHM'
     # prior class
     prior_class = 'IntrinsicLVCPrior'
-    # run directory
-    rundir = '../data/pe_runs_lensing/injections'
     if not os.path.exists(rundir):
         os.makedirs(rundir)
 
@@ -85,7 +93,7 @@ def run_parameter_estimation_injection(event_data, t_merger_guess, mchirp_guess,
     sample_from_posterior(posterior, rundir, verbose=verbose)
 
 
-def create_injection(seed=0, params_to_inject=None):
+def create_injection(eventname=None, seed=0, params_to_inject=None):
 
     aux_prior = cogwheel.gw_prior.LVCPrior(
         f_ref=100.0,
@@ -104,7 +112,7 @@ def create_injection(seed=0, params_to_inject=None):
         'm2' : 10,    # in Msun
         's1z' : 0.,
         's2z' : 0.,
-        'psi' : 0.5,       # polarization
+        'psi' : 0.5,       # polarization angle
         'iota' : np.pi / 2 - 0.1,      # inclination angle
         's1x_n' : 0.,
         's1y_n' : 0.,
@@ -128,7 +136,7 @@ def create_injection(seed=0, params_to_inject=None):
     # then create the injection
     asd_funcs = list(cogwheel.data.ASDS)  # TODO: update to O4 PSD
 
-    eventname = f'GW{seed}'
+    eventname = f'GW{seed}' if eventname is None else eventname
     event_data = cogwheel.data.EventData.gaussian_noise(
         eventname, duration=128.0, detector_names='HLV', fmax=512.0,
         asd_funcs=asd_funcs, tgps=0.0, seed=seed)
