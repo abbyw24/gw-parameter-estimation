@@ -101,7 +101,10 @@ def run_parameter_estimation(eventname, t_merger_guess, mchirp_guess,
         ref_wf_finder_kwargs={
             'f_ref': 100.0,  # Just so it matches the injection and it makes sense to compare parameters
             'time_range': (t_merger_guess - 0.1, t_merger_guess + 0.1)  # Edit if needed
-        }
+        },
+        likelihood_kwargs={
+            'coherent_score' : {'max_log2n_qmc' : 18}   # increase the size of the qmc sequence, to make
+        }                                               #   the algorithm "work harder" to find a good match
     )
 
     # sample from the posterior
@@ -147,7 +150,7 @@ def sample_from_posterior(posterior, parentdir, n_live=1000, n_eff=2000,
     sampler.run(rundir)
 
 
-def find_existing_sampler(eventdir, max_runs=10):
+def find_existing_sampler(eventdir, max_runs=10, load_sampler=True):
     if not os.path.exists(eventdir):
         return 'not_found', None, None
 
@@ -161,7 +164,10 @@ def find_existing_sampler(eventdir, max_runs=10):
         if os.path.exists(os.path.join(rundir, 'samples.feather')):
             return 'complete', None, rundir
 
-        sampler = cogwheel.utils.read_json(sampler_fn)
+        if load_sampler:
+            sampler = cogwheel.utils.read_json(sampler_fn)
+        else:
+            sampler = None
         return 'found', sampler, rundir
 
     return 'not_found', None, None
@@ -221,6 +227,9 @@ def get_chirp_mass(event_table):
         except TypeError:
             print(f"couldn't get redshift information. defaulting to source-frame chirp mass")
             chirp_mass = event_table['chirp_mass_source']
+            if chirp_mass == None:
+                print(f"source-frame chirp mass is None. exiting")
+                return None
     # unpack the actual number, which is slightly buried in this masked array setup
     return chirp_mass.value.data[0]
 
