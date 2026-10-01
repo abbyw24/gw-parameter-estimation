@@ -30,7 +30,9 @@ def run_one_injection(idx, params_to_inject):
 
 if __name__=='__main__':
 
-    idxs_to_run = [0, 17, 19, 26, 40, 46, 64, 71, 73, 79, 91, 92, 93]
+    # idxs_to_run = [14, 38, 74, 96]  # cases with lnB < -1
+    # idxs_to_run = [51, 55, 76, 86]  # cases with lnB close to zero
+    idxs_to_run = [17, 26, 40, 64, 73, 92]
     nproc = len(idxs_to_run)
     print(f"Launching {nproc} processes", flush=True)
 

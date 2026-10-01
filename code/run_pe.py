@@ -58,7 +58,7 @@ if __name__=='__main__':
     ]
     print(f"Found {len(eventname_list)} events in {CATALOG_DIR}", flush=True)
 
-    # ens = ['GW241129_021832', 'GW241129_021832']
+    # ens = ['GW240519_012815', 'GW240515_005301']
     # for en in ens:
     #     eventname_list.remove(en)
     #     print(f"removed {en} from the event list", flush=True)
@@ -68,7 +68,7 @@ if __name__=='__main__':
     ncomplete = 0
     for eventname in eventname_list:
         eventdir = os.path.join(PARENTDIR, PRIOR_CLASS, eventname)
-        status, _, _ = find_existing_sampler(eventdir)
+        status, _, _ = find_existing_sampler(eventdir, load_sampler=False)
         if status == 'complete':
             ncomplete += 1
             events_to_run.remove(eventname)
