@@ -57,7 +57,10 @@ def run_parameter_estimation(params_to_inject, parentdir, eventname=None, seed=N
         ref_wf_finder_kwargs={
             'f_ref': 100.0,  # so it matches the injection and it makes sense to compare params
             'time_range': (t_merger_guess - 0.1, t_merger_guess + 0.1)  # Edit if needed
-        }
+        },
+        likelihood_kwargs={
+            'coherent_score' : {'max_log2n_qmc' : 18}   # increase the size of the qmc sequence, to make
+        }                                               #   the algorithm "work harder" to find a good match
     )
 
     sample_from_posterior(posterior, parentdir, verbose=verbose)
