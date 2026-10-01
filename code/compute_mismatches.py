@@ -23,30 +23,31 @@ def main():
     nevents = 100
 
     # include the noise?
-    noise = True
+    noise = False
 
-    idxs = [93] #range(nevents)
+    idxs = [91, 93] #range(nevents)
 
-    for idx in idxs:
-        # load the sampler for this event
-        eventname = f'GW{seed}_{idx}'
-        eventdir = os.path.join(resdir, eventname)
-        try:
-            event_data, _, samples_dir = helpers.load_event_data_and_posterior_samples(eventdir, eventname)
-        except FileNotFoundError:
-            print(f"no samples for idx {idx}. continuing")
-            continue
+    for noise in [True, False]:
+        for idx in idxs:
+            # load the sampler for this event
+            eventname = f'GW{seed}_{idx}'
+            eventdir = os.path.join(resdir, eventname)
+            try:
+                event_data, _, samples_dir = helpers.load_event_data_and_posterior_samples(eventdir, eventname)
+            except FileNotFoundError:
+                print(f"no samples for idx {idx}. continuing")
+                continue
 
-        # load the sampler
-        sampler = utils.read_json(os.path.join(samples_dir, 'Sampler.json'))
-        # unlens the event data
-        ed_u = event_data.reinstantiate(strain=event_data.strain * -1j)
+            # load the sampler
+            sampler = utils.read_json(os.path.join(samples_dir, 'Sampler.json'))
+            # unlens the event data
+            ed_u = event_data.reinstantiate(strain=event_data.strain * -1j)
 
-        mismatch, rhosq = compute_mismatch(sampler.posterior, ed_u, noise=noise)
+            mismatch, rhosq = compute_mismatch(sampler.posterior, ed_u, noise=noise)
 
-        # save these
-        noise_tag = '_nonoise' if noise == False else ''
-        np.save(os.path.join(eventdir, f'mismatch{noise_tag}.npy'), dict(mismatch=mismatch, rhosq=rhosq, noise=noise))
+            # save these
+            noise_tag = '_nonoise' if noise == False else ''
+            np.save(os.path.join(eventdir, f'mismatch{noise_tag}.npy'), dict(mismatch=mismatch, rhosq=rhosq, noise=noise))
 
 
 def compute_mismatch(post, ed_u, noise=False, verbose=True):
