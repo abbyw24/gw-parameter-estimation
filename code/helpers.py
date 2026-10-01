@@ -31,23 +31,29 @@ def add_derived_quantities(samples):
     for mass_key in 'm1', 'm2', 'mtot':
         samples[f'{mass_key}_source'] = samples[mass_key] / (1 + samples['redshift'])
 
+    samples['cosiota'] = np.cos(samples['iota'])
+
     samples['chieff'] = cogwheel.gw_utils.chieff(**samples[['m1', 'm2', 's1z', 's2z']])
 
     samples['chip'] = chip(**samples[['m1', 'm2', 's1x_n', 's2x_n', 's1y_n', 's2y_n']])
 
     samples['q'] = samples['m2'] / samples['m1']
 
-def add_derived_quantities_injection(par_dict):
+    # this is just to change the latex labels in plotting
+    samples['d_luminosity_lensed'] = samples['d_luminosity']
+
+def add_derived_quantities_injection(par_dic):
     """
     Add derived quantities to an injection dictionary.
 
     """
-    par_dict['mchirp'] = cogwheel.gw_utils.m1m2_to_mchirp(par_dict['m1'], par_dict['m2'])
-    par_dict['q'] = par_dict['m2'] / par_dict['m1']
-    par_dict['chieff'] = cogwheel.gw_utils.chieff(par_dict['m1'], par_dict['m2'],
-                                                  par_dict['s1z'], par_dict['s2z'])
-    par_dict['chip'] = chip(par_dict['m1'], par_dict['m2'],
-                            par_dict['s1x_n'], par_dict['s2x_n'], par_dict['s1y_n'], par_dict['s2y_n'])
+    par_dic['mchirp'] = cogwheel.gw_utils.m1m2_to_mchirp(par_dic['m1'], par_dic['m2'])
+    par_dic['q'] = par_dic['m2'] / par_dic['m1']
+    par_dic['chieff'] = cogwheel.gw_utils.chieff(par_dic['m1'], par_dic['m2'],
+                                                  par_dic['s1z'], par_dic['s2z'])
+    par_dic['chip'] = chip(par_dic['m1'], par_dic['m2'],
+                            par_dic['s1x_n'], par_dic['s2x_n'], par_dic['s1y_n'], par_dic['s2y_n'])
+    par_dic['d_luminosity_lensed'] = par_dic['d_luminosity']
 
 def load_event_data_and_posterior_samples(event_path, eventname, run=0, verbose=True):
     # find the "earliest" run with posterior samples
@@ -76,23 +82,55 @@ def load_event_data_and_posterior_samples(event_path, eventname, run=0, verbose=
 
 
 def load_lvk_samples(eventname, key=None):
+    # for bookkeeping
+    catalogs = ['GWTC-5.0', 'GWTC-4.0', 'GWTC-2.1']
+    # for filenames to try
+    catalog_tags = [
+        ['GWTC5p0-59d160a18_25', 'combined_PEDataRelease.hdf5'],
+        ['GWTC4p0-1a206db3d_721', 'combined_PEDataRelease.hdf5'],
+        ['GWTC2p1-v2', 'PEDataRelease_mixed_cosmo.h5']
+    ]
     # load the posterior samples from the LIGO PE data release
-    try:
-        pe_data_fn = f"../data/pe_data_release/IGWN-GWTC4p0-1a206db3d_721-{eventname}-combined_PEDataRelease.hdf5"
-        data = read(pe_data_fn)
-        key = 'C00:IMRPhenomXPHM-SpinTaylor' if key is None else key
-    except FileNotFoundError:
-        # try GWTC-2.1
+    for catalog, catalog_tag in zip(catalogs, catalog_tags):
         try:
-            pe_data_fn = f"../data/pe_data_release/IGWN-GWTC2p1-v2-{eventname}_PEDataRelease_mixed_cosmo.h5"
+            pe_data_fn = f"../data/pe_data_release/IGWN-{catalog_tag[0]}-{eventname}-{catalog_tag[1]}"
             data = read(pe_data_fn)
-            key = 'C01:IMRPhenomXPHM' if key is None else key
         except FileNotFoundError:
-            print(f"couldn't find any LVK samples for {eventname} (in GWTC-4.0 or GWTC-2.1)")
-            return
-
+            data = None
+            continue
+        if data is not None:
+            break
+    if data is None:
+        print(f"couldn't find any LVK samples for {eventname} (in {' or '.join(catalogs)})")
+        return
+    
+    key = 'C00:IMRPhenomXPHM-SpinTaylor' if catalog in ['GWTC-5.0', 'GWTC-4.0'] else 'C01:IMRPhenomXPHM'
     # get the posterior samples using the [key] approximant
-    samples = data.samples_dict[key]
+    samples = pd.DataFrame.from_dict(data.samples_dict[key])
+    # swap keys to match cogwheel's
+    mapping_dict = {
+        'luminosity_distance' : 'd_luminosity',
+        'luminosity_distance' : 'd_luminosity_lensed',
+        'mass_ratio' : 'q',
+        'chirp_mass' : 'mchirp',
+        'mass_1' : 'm1',
+        'mass_2' : 'm2',
+        'mass_1_source' : 'm1_source',
+        'mass_2_source' : 'm2_source',
+        'total_mass' : 'mtot',
+        'total_mass_source' : 'mtot_source',
+        'cos_iota' : 'cosiota',
+        'chi_eff' : 'chieff',
+        'spin_1x' : 's1x',
+        'spin_1y' : 's1y',
+        'spin_1z' : 's1z',
+        'spin_2x' : 's2x',
+        'spin_2y' : 's2y',
+        'spin_2z' : 's2z',
+        'log_likelihood' : 'lnl',
+        'geocent_time' : 't_geocenter'
+    }
+    samples.rename(columns=mapping_dict, inplace=True)
 
     return samples
 
@@ -153,7 +191,7 @@ def plot_p_lensed(samples, eventname=None, fig=None,
     ax.set_ylim(0., None)
     
     # vlines
-    median, *span = get_pII_median_span(samples)
+    median, *span = get_samples_median_and_span(samples, 'p_lensed')
     for val in (median, *span):
         ax.plot([val] * 2, [0, np.interp(val, edges, pdf)], c=c, alpha=0.8, lw=0.5)
     idx = (edges > span[0]) & (edges < span[1])
@@ -169,21 +207,22 @@ def get_medians(samples, corner_plot):
     return medians
 
 
-def get_pII_median_span(samples, confidence_level=0.9):
+def get_samples_median_and_span(samples, par='p_lensed', confidence_level=0.9):
     """
-    Compute the median and span of pII (`p_lensed`) from posterior samples.
+    Compute the median and span of a parameter distribution from posterior samples.
+    The default column is pII (`'p_lensed'`).
     `confidence_level` = 0.9 is the default `corner_plot.plotstyle.confidence_level`.
     """
     #   (this is copied from plotting.py's _get_median_and_central_interval())
     tail_prob = (1 - confidence_level) / 2
-    median, *span = cogwheel.utils.quantile(samples['p_lensed'], (.5, tail_prob, 1 - tail_prob), weights=samples['weights'])
+    median, *span = cogwheel.utils.quantile(samples[par], (.5, tail_prob, 1 - tail_prob), weights=samples['weights'])
     return median, *span
 
 def lensed_sanity_check(samples):
     unlensed = ~samples['lensed']
     w = samples['weights']
     N = len(samples)
-    median, *span = get_pII_median_span(samples)
+    median, *span = get_samples_median_and_span(samples, 'p_lensed')
     print(f"{unlensed.sum() / N * 100:.2f}% of samples are unlensed ({w[unlensed].sum() / w.sum():.2e} of weights)")
     print(f"pII = {median:.5f} +{span[1]-median:.5f} -{median-span[0]:.5f}")
 
@@ -237,16 +276,19 @@ def compute_HH(likelihood):
     # get the injected parameters
     par_dic = likelihood.event_data.injection['par_dic']
     # waveform (frequency domain) in each detector
-    h = likelihood._get_h_f(par_dic, by_m=True)
-    H = np.zeros_like(h[0,:])
-    for m, h_m in zip(likelihood.waveform_generator.m_arr, h):
+    f = likelihood.event_data.frequencies[likelihood.event_data.fslice]
+    hphc0 = likelihood.waveform_generator.compute_hplus_hcross(f, par_dic | dict(iota=np.pi / 2), by_m=True)
+    # shape (nmodes, 2, nfreq)
+    H = np.zeros_like(hphc0[0,:])
+    # TODO: change shape of H for compute_h_h to match n detectors
+    for m, h_m in zip(likelihood.waveform_generator.m_arr, hphc0):
         H += S_m(m, par_dic['iota']) * h_m
     # and the inner product
     return likelihood._compute_h_h(H)
 
 def max_over_distance(likelihood, par_dic, shift, print_res=False):
     """
-    Returns the likelihood of the unlensed "imposter" waveform psi -> psi + pi/4 maximized over luminosity distance.
+    Returns the likelihood of the unlensed "imposter" waveform psi -> psi ± pi/4 maximized over luminosity distance.
     """
     psi_shifted = par_dic['psi'] + shift
     def f(dL):
