@@ -67,7 +67,7 @@ def run_parameter_estimation(params_to_inject, parentdir, eventname=None, seed=N
 
 
 def create_injection(params_to_inject=None, eventname=None, seed=None,
-                     approximant='IMRPhenomXPHM'):
+                     approximant='IMRPhenomXPHM', fmax=512):
     """
     Create GW injection data and return it as an `EventData` object.
 
@@ -118,7 +118,7 @@ def create_injection(params_to_inject=None, eventname=None, seed=None,
         eventname = f'GW{seed}' if seed is not None else 'GW'
 
     event_data = cogwheel.data.EventData.gaussian_noise(
-        eventname, duration=128.0, detector_names='HLV', fmax=512.0,
+        eventname, duration=128.0, detector_names='HLV', fmax=fmax,
         asd_funcs=['asd_H_O3', 'asd_L_O3', 'asd_V_O3'], tgps=0.0, seed=seed)
 
     event_data.inject_signal(par_dic=injection_dic, approximant=approximant)
